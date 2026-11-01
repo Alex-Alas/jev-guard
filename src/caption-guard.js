@@ -26,6 +26,7 @@ const DEFAULTS = {
   holdSealMs: 900,
   maxConcurrent: 4,
   prefetchMutable: true,
+  minRightWords: 3,
   contextChars: 60,
   cacheSize: 500,
   doneMax: 256,
@@ -33,7 +34,7 @@ const DEFAULTS = {
   breakerFailures: 3,
   breakerCooldownMs: 30_000,
   minSeverity: 2,
-  thresholds: { allowBelow: 0.35, choiceMin: 0.5 }
+  thresholds: { allowBelow: 0.2, choiceMin: 0.8, keepMax: 0.15 }
 };
 
 /**
@@ -171,6 +172,11 @@ export function createCaptionGuard(opts) {
     const key = `${hit.id}|${normalize(joined.slice(left, hit.end)).replace(/\s+/g, ' ').trim()}`;
     let v = getVerdict(key);
     if (!v) {
+      // Sin contexto a la derecha Jev decide peor (medido: «Abran la shit» -> tapar;
+      // «Abran la shit de cálculo y…» -> «sheet»). Se espera a tener
+      // `minRightWords` palabras después del hit, o al sello. Mientras: tapado.
+      const rightWords = joined.slice(hit.end).split(/\s+/).filter(Boolean).length;
+      if (!c.lastIn.sealed && rightWords < cfg.minRightWords) return { text: maskFor(hit), pending: false };
       const context = {
         sentence: joined.length > 400 ? joined.slice(Math.max(0, hit.start - 200), hit.end + 200) : joined,
         previous: lastSealed.get(c.lane) || '',

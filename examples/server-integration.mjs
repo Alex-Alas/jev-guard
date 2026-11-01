@@ -18,7 +18,9 @@ function broadcastToDisplays(msg) {
 
 const guard = createCaptionGuard({
   jev: process.env.COMMAND_CODE_API_KEY
-    ? createJevClient({ apiKey: process.env.COMMAND_CODE_API_KEY, timeoutMs: 1500 })
+    ? createJevClient({ apiKey: process.env.COMMAND_CODE_API_KEY, timeoutMs: 800 })
+    // TypeSafe directo: createJevClient({ apiKey: process.env.TYPESAFE_JEV_API_KEY,
+    //   endpoint: TYPESAFE_ENDPOINT, model: TYPESAFE_MODEL, timeoutMs: 800 })
     : undefined, // sin key: modo solo-léxico (tapa todo lo marcado, sin correcciones)
   emit: broadcastToDisplays,
   holdSealMs: 900,

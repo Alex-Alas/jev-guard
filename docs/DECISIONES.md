@@ -29,5 +29,11 @@ Así una palabra se consulta una vez aunque la línea siga creciendo a la derech
 **D-09 · Integración en el servidor como opción principal.**
 Un solo punto cubre LED, vMix y `/listen`. La key nunca sale del servidor y hay una sola llamada a Jev por palabra, sin importar cuántas salidas haya. La variante de navegador queda como plan B. *Cerrada.*
 
+**D-11 · Umbrales calibrados con Jev real; la confianza de la corrección es el filtro principal.**
+Con Jev real, la pregunta «¿era grosería real?» devolvió p de 0,13 a 0,38 para groserías verdaderas: Jev las subestima en contexto de charla. En cambio, la confianza de la corrección separa bien: las legítimas ≥ 0,89 y las falsas ≤ 0,51. Valores: `allowBelow 0.2`, `choiceMin 0.8`, `keepMax 0.15`. Resultado: 28 llamadas, 0 casos peligrosos. Reemplaza los umbrales de D-04 (0.35 / 0.5). *Cerrada.*
+
+**D-12 · Esperar 3 palabras de contexto a la derecha antes de consultar.**
+Con «Abran la shit» Jev tapó; con «Abran la shit de cálculo y…» corrigió a «sheet». El costo es que la palabra sigue tapada unos ~300 ms más. Al llegar el sello se consulta igual. *Cerrada.*
+
 **D-10 · Sin auditoría de oración completa (por ahora).**
 Jev no localiza la palabra ofensiva. Tapar oraciones enteras por una sospecha es peor para el público que el riesgo residual. Hay que revisarla si los ensayos muestran groserías fuera del léxico. Trigger: ≥ 1 grosería no listada por cada 30 min de ensayo. *Diferida, con trigger.*

@@ -8,7 +8,7 @@
 
 - **Problema:** el reconocedor de voz y el traductor a veces producen una grosería que el ponente nunca dijo. La cola del subtítulo se reescribe mientras la persona habla, así que una grosería falsa puede aparecer en pantalla aunque luego se corrija sola.
 - **Solución:** una función `guard.push(msg)` que se intercala antes de difundir cada subtítulo. Un léxico local tapa al instante cualquier palabra sospechosa. Después Jev decide, con el contexto, si era una grosería real, un error de reconocimiento (y cuál era la palabra correcta) o una palabra inocente.
-- **Latencia añadida al texto limpio:** prácticamente 0, porque el filtrado es síncrono y menor a 1 ms. Las palabras marcadas se ven como «…» durante el tiempo que tarde Jev (~0,4–1,5 s). El sellado de una línea con palabras pendientes se retiene hasta 900 ms.
+- **Latencia añadida al texto limpio:** prácticamente 0, porque el filtrado es síncrono y menor a 1 ms. Las palabras marcadas se ven como «…» mientras se junta contexto (3 palabras más) y Jev responde (medido: p50 132 ms, p90 172 ms). El sellado de una línea con palabras pendientes se retiene hasta 900 ms (en la práctica, ~150 ms).
 - **Garantía central:** ningún término del léxico llega crudo a ninguna salida. Ante cualquier falla, el resultado es «…», nunca la palabra.
 
 ---
@@ -123,6 +123,7 @@ Solo se usa contexto **izquierdo** porque es estable: cuando el STT agrega palab
 ### 4.3 Consultas a Jev
 
 - Cola con concurrencia máxima `maxConcurrent` (4).
+- **Contexto mínimo (`minRightWords`, 3):** no se consulta hasta que haya 3 palabras después del hit, o hasta que llegue el sello. Medido con Jev real: con «Abran la shit» Jev tapaba; con «Abran la shit de cálculo y…» corrige a «sheet». Mientras tanto la palabra sigue tapada.
 - **Prefetch de la cola mutable:** un hit en `mutable` se consulta solo si hay hueco de concurrencia, para no gastar cupo en palabras que el STT probablemente va a cambiar. Un hit en `committed` siempre se encola.
 - Todos los captions que muestran el mismo hit (misma clave) quedan como *waiters* y se repintan cuando llega el veredicto.
 - **Circuit breaker:** después de 3 fallos seguidos no se llama a Jev durante 30 s. Mientras tanto todo hit se tapa sin consultar (modo solo-léxico).
@@ -183,24 +184,34 @@ Además se tapa siempre, sin consultar, cualquier palabra ya censurada por el ST
 }
 ```
 
-Respuesta usada: `answers.real.noul` (probabilidad 0–1) y `answers.fix.choice` (clave).
+Respuesta real (verificada):
+
+```json
+{ "real": { "type": "noul", "noul": 0.1 },
+  "fix":  { "type": "choice", "choice": "w0", "confidence": 0.94,
+            "probabilities": { "w0": 0.95, "w1": 0.01, "keep": 0 } } }
+```
+
+Proveedores probados: TypeSafe directo (`https://api.typesafe.ai/v1/systemone`, modelo `jev-latest`, sin CORS, así que solo sirve desde el servidor) y Command Code (`typesafe/jev`).
 
 ### 6.2 Regla de decisión (`decide`)
 
 ```
 p = answers.real.noul
-p inválido                                → TAPAR
-p ≥ allowBelow (0.35)                     → TAPAR   (probable grosería real)
-fix.choice ∈ alts (y confianza ≥ 0.5)     → CORREGIR con esa palabra (respeta mayúsculas)
-entrada amb                               → MOSTRAR la original
-si no                                     → TAPAR   (fue error, pero no hay corrección segura)
+p inválido                                            → TAPAR
+p ≥ allowBelow (0.2)                                  → TAPAR   (probable grosería real)
+prob[choice] ≥ choiceMin (0.8) y prob[keep] ≤ 0.15    → CORREGIR con esa palabra (respeta mayúsculas)
+entrada amb                                           → MOSTRAR la original
+si no                                                 → TAPAR   (no hay corrección segura)
 ```
 
-Para ser más estrictos se baja `allowBelow`. Con `0` nunca se destapa ni se corrige: queda como un filtro puro con Jev de adorno.
+**Importante (medido):** Jev subestima `real` en charlas. Groserías reales dieron p entre 0,13 y 0,38. Por eso `real` solo es un primer filtro, y **la protección principal es la confianza de la corrección**: las correcciones legítimas dieron ≥ 0,89 y las groserías reales ≤ 0,51. Detalle en `docs/CALIBRACION.md`.
+
+Para ser más estrictos se sube `choiceMin`. Con `allowBelow: 0` nunca se destapa ni se corrige.
 
 ### 6.3 Presupuesto de tiempo
 
-`timeoutMs` por llamada: 1500. Referencia medida en el prototipo `boca-limpia`: ~400 ms para una pregunta simple y hasta ~1,6 s para un paquete de cinco preguntas. Con dos preguntas se espera algo cercano al primer número. **[SUPUESTO]** Hay que medirlo en la red del evento (§9).
+Medido el 31-oct-2026 desde El Salvador contra TypeSafe directo: **p50 132 ms, p90 172 ms, máx. 379 ms** (la primera llamada es la más lenta). `timeoutMs` recomendado: 800. Hay que volver a medir desde la red del evento (§9).
 
 ---
 
@@ -228,19 +239,19 @@ Para ser más estrictos se baja `allowBelow`. Con `0` nunca se destapa ni se cor
 
 | # | Supuesto | Cómo verificar | Si es falso |
 | --- | --- | --- | --- |
-| S1 | `answers.fix.choice` devuelve la **clave** de la opción (`w0`, `keep`). | Una llamada real con `fix` y revisar el JSON. | Ajustar `decide()`. Si devuelve el texto del criterio, mapear por texto. |
-| S2 | `noul` es una probabilidad 0–1 de «true». | Igual que S1 (en `boca-limpia` se usaba así). | Ajustar umbrales. |
+| S1 | ~~`answers.fix.choice` devuelve la clave~~ **Verificado:** clave + `confidence` + `probabilities`. | — | — |
+| S2 | ~~`noul` es probabilidad 0–1~~ **Verificado.** | — | — |
 | S3 | `/listen` lee del mismo flujo `/display`. | Revisar el servidor. | Pasar ese flujo por el guard también. |
 | S4 | `committed` solo crece (prefijo estable). | Logs de revisiones reales. | Nada se rompe: la clave cambia y se vuelve a consultar. Solo aumenta el costo. |
-| S5 | Latencia de Jev < 900 ms en la red del evento. | `npm run simulate` con key real desde el sitio. | Subir `holdSealMs` o aceptar más sellos forzados (que siguen siendo seguros). |
+| S5 | Latencia < 900 ms en la red del evento. Desde El Salvador: p90 172 ms. | `node examples/probe-jev.mjs` desde el sitio. | Subir `holdSealMs`. |
 | S6 | El texto del caption es español (traducción). | `state.target`. | El léxico ya cubre EN y ES. Solo cambian los `alts` útiles. |
 
 ---
 
 ## 9. Ensayo antes del evento
 
-1. `npm test`: 24/24.
-2. `COMMAND_CODE_API_KEY=… npm run simulate` desde la misma red o región que el motor. Anotar las latencias de `jev_result`.
+1. `npm test`: 26/26.
+2. Con la key en el entorno, correr `node examples/probe-jev.mjs` (calibración + latencias) y `npm run simulate` desde la misma red o región que el motor. La línea final debe decir `PELIGRO=0`.
 3. Con el motor real: leer en voz alta un guion con trampas fonéticas («spreadsheet», «fork», «beach», «focus», «shift», «count») y con alguna grosería real. Verificar en el LED y en `/listen`:
    - Nunca aparece la grosería ni se lee en voz alta.
    - Las trampas se ven bien o, a lo sumo, un «…» breve.
@@ -259,19 +270,21 @@ Para ser más estrictos se baja `allowBelow`. Con `0` nunca se destapa ni se cor
 | `holdSealMs` | ms | 900 | Retención máxima del sello. |
 | `maxConcurrent` | n | 4 | Consultas simultáneas a Jev. |
 | `prefetchMutable` | bool | true | Consultar hits de la cola mutable si hay hueco. |
+| `minRightWords` | n | 3 | Palabras a la derecha requeridas antes de consultar (o sello). |
 | `contextChars` | n | 60 | Contexto izquierdo en la clave de caché. |
 | `cacheSize` | n | 500 | Veredictos recordados. |
 | `doneMax` | n | 256 | Captions sellados recordados (repetidos se ignoran). |
 | `failureTtlMs` | ms | 10000 | Vida de un veredicto «tapar por error». |
 | `breakerFailures` / `breakerCooldownMs` | n / ms | 3 / 30000 | Circuit breaker. |
 | `minSeverity` | 1–4 | 2 | Severidad mínima del léxico. |
-| `thresholds.allowBelow` | 0–1 | 0.35 | Ver §6.2. |
-| `thresholds.choiceMin` | 0–1 | 0.5 | Confianza mínima en la corrección, si Jev da distribución. |
+| `thresholds.allowBelow` | 0–1 | 0.2 | Ver §6.2. |
+| `thresholds.choiceMin` | 0–1 | 0.8 | Confianza mínima en la palabra corregida. |
+| `thresholds.keepMax` | 0–1 | 0.15 | Máxima probabilidad de «era la palabra original» para aceptar una corrección. |
 | `getSource` | `(msg)=>string` | `msg.source` | Texto original en inglés. |
 | `onEvent` | `(e)=>void` | — | Telemetría. |
 | `now`, `setTimeout`, `clearTimeout` | — | globales | Inyectables para pruebas. |
 
-`createJevClient({ apiKey | proxyUrl, endpoint?, model?, timeoutMs? = 1500, fetch? })`
+`createJevClient({ apiKey | proxyUrl, endpoint?, model?, timeoutMs? = 1500, fetch? })`. Para TypeSafe directo: `endpoint: TYPESAFE_ENDPOINT, model: TYPESAFE_MODEL` (exportados).
 
 ---
 

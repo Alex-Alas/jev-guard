@@ -5,6 +5,9 @@
 
 export const COMMAND_CODE_ENDPOINT = 'https://api.commandcode.ai/provider/v1/systemone';
 export const DEFAULT_MODEL = 'typesafe/jev';
+// TypeSafe directo (sin CORS: solo desde servidor). Probado el 31-oct-2026.
+export const TYPESAFE_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
+export const TYPESAFE_MODEL = 'jev-latest';
 
 /**
  * @param {object} opts
@@ -106,19 +109,23 @@ export function buildHitQuery(hit, context) {
  *   { action: 'replace', word: 'fork' }      -> se muestra la corrección
  */
 export function decide(hit, answers, keys, thresholds = {}) {
-  const allowBelow = thresholds.allowBelow ?? 0.35;
-  const choiceMin = thresholds.choiceMin ?? 0.5;
+  // Valores calibrados con Jev real (TypeSafe jev-latest, 31-oct-2026). Ver docs/CALIBRACION.md.
+  const allowBelow = thresholds.allowBelow ?? 0.2;
+  const choiceMin = thresholds.choiceMin ?? 0.8;
+  const keepMax = thresholds.keepMax ?? 0.15;
   const p = answers?.real?.noul;
   if (typeof p !== 'number' || Number.isNaN(p)) return { action: 'mask', reason: 'no_answer' };
   if (p >= allowBelow) return { action: 'mask', reason: 'likely_profanity', p };
 
   const fix = answers.fix;
-  const choice = fix && (fix.choice ?? fix.answer);
+  const choice = fix && fix.choice;
   if (choice && keys[choice]) {
-    // Si Jev devuelve distribución, se exige un mínimo de confianza en la elegida.
-    const dist = fix.probabilities || fix.distribution || fix.scores;
-    const conf = dist && typeof dist[choice] === 'number' ? dist[choice] : 1;
-    if (conf >= choiceMin) return { action: 'replace', word: keys[choice], reason: 'asr_error', p };
+    // Jev devuelve { choice, confidence, probabilities }. Se exige que la opción
+    // elegida sea clara Y que «keep» (era la palabra original) sea improbable.
+    const dist = fix.probabilities || {};
+    const conf = typeof dist[choice] === 'number' ? dist[choice] : (typeof fix.confidence === 'number' ? fix.confidence : 0);
+    const keep = typeof dist.keep === 'number' ? dist.keep : 1;
+    if (conf >= choiceMin && keep <= keepMax) return { action: 'replace', word: keys[choice], reason: 'asr_error', p, conf };
   }
   if (hit.amb) return { action: 'show', reason: 'innocent_meaning', p };
   return { action: 'mask', reason: 'no_safe_correction', p };

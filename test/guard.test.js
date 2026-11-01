@@ -11,6 +11,7 @@ function setup(rules, extra = {}) {
   const guard = createCaptionGuard({
     jev,
     holdSealMs: 80,
+    minRightWords: 0,
     emit: (m) => { out.push(m); feed.push(m); },
     ...extra
   });
@@ -172,4 +173,26 @@ test('propiedad: con Jev diciendo «real», ninguna grosería llega jamás a pan
   await sleep(200);
   for (const t of feed.shown) assert.deepEqual(detect(t), [], t);
   assert.equal(feed.reopened.length, 0);
+});
+
+test('espera contexto a la derecha antes de preguntar a Jev', async () => {
+  const { guard, jev, out } = setup(() => ({ real: 0.05, fix: 'sheet' }), { minRightWords: 3 });
+  guard.push(cap('a', 1, 'Abran la', 'shit'));
+  guard.push(cap('a', 2, 'Abran la shit', 'de'));
+  await sleep(20);
+  assert.equal(jev.calls.length, 0, 'todavía sin contexto suficiente');
+  assert.ok(out.every((m) => !text(m).includes('shit')));
+  guard.push(cap('a', 3, 'Abran la shit de', 'cálculo y'));
+  await sleep(30);
+  assert.equal(jev.calls.length, 1);
+  assert.match(jev.calls[0].state, /cálculo y/);
+  assert.equal(text(out.at(-1)), 'Abran la sheet de cálculo y');
+});
+
+test('al sellar pregunta aunque no haya contexto a la derecha', async () => {
+  const { guard, jev, out } = setup(() => ({ real: 0.9 }), { minRightWords: 3 });
+  guard.push(cap('a', 1, 'fue una mierda', '', true));
+  await sleep(30);
+  assert.equal(jev.calls.length, 1);
+  assert.equal(out.at(-1).sealed, true);
 });

@@ -2,11 +2,12 @@
 // filtra antes de la «pantalla». Muestra en orden lo que vería el público.
 //
 //   npm run simulate                      -> Jev simulado (sin red)
-//   COMMAND_CODE_API_KEY=... npm run simulate  -> Jev real
+//   TYPESAFE_JEV_API_KEY=... o COMMAND_CODE_API_KEY=... npm run simulate  -> Jev real
 
-import { createCaptionGuard, createJevClient } from '../src/index.js';
+import { createCaptionGuard } from '../src/index.js';
+import { jevFromEnv } from './jev-from-env.mjs';
 
-const key = process.env.COMMAND_CODE_API_KEY || process.env.COMMAND_CODE_MAIN_API;
+const real = jevFromEnv({ timeoutMs: 1500 });
 const started = Date.now();
 const t = () => String(Date.now() - started).padStart(5, ' ') + ' ms';
 
@@ -18,14 +19,15 @@ const mockJev = {
     const answers = { real: { noul: word === 'shit' ? 0.04 : 0.93 } };
     if (questions.fix) {
       const k = Object.keys(questions.fix.criteria).find((x) => questions.fix.criteria[x].includes('"sheet"'));
-      answers.fix = { choice: word === 'shit' && k ? k : 'keep' };
+      const c = word === 'shit' && k ? k : 'keep';
+      answers.fix = { choice: c, confidence: 1, probabilities: { [c]: 1, keep: c === 'keep' ? 1 : 0 } };
     }
     return { answers, latency: 350 };
   }
 };
 
-const jev = key ? createJevClient({ apiKey: key, timeoutMs: 1500 }) : mockJev;
-console.log(key ? 'Jev REAL (Command Code)\n' : 'Jev SIMULADO (350 ms)\n');
+const jev = real.jev || mockJev;
+console.log(real.jev ? `Jev REAL · ${real.label}\n` : 'Jev SIMULADO (350 ms)\n');
 
 const guard = createCaptionGuard({
   jev,

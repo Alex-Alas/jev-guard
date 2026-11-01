@@ -8,7 +8,7 @@ Capa anti-groserías para los subtítulos en vivo de C2 Live. Se coloca **entre 
 motor STT + traducción ──► guard.push(caption) ──► /display (LED, vMix, /listen)
                                 │
                                 ├─ 1. Léxico local (EN + ES, < 1 ms): tapa al instante con «…»
-                                └─ 2. Jev revisa la palabra tapada en contexto (~0,4–1 s):
+                                └─ 2. Jev revisa la palabra tapada en contexto (medido: p50 132 ms, p90 172 ms):
                                         · era un error  → se repinta con la palabra correcta
                                         · era inocente  → se muestra la original (solo palabras ambiguas)
                                         · era real / no responde → se queda tapada
@@ -18,7 +18,7 @@ Tres reglas que no se negocian:
 
 1. **Nada marcado sale crudo.** El tapado ocurre en la misma llamada en la que entra el subtítulo; no espera a la red.
 2. **Ante la duda, tapado.** Si Jev falla, tarda o duda, la palabra queda como «…».
-3. **El sellado se retiene** hasta que Jev decide (máx. 900 ms), porque lo sellado se lee en voz alta en `/listen`.
+3. **El sellado se retiene** hasta que Jev decide (máx. 900 ms; en la práctica ~150 ms), porque lo sellado se lee en voz alta en `/listen`.
 
 ## Integración (5 líneas)
 
@@ -29,6 +29,8 @@ import { createCaptionGuard, createJevClient } from 'jev-guard';
 
 const guard = createCaptionGuard({
   jev: createJevClient({ apiKey: process.env.COMMAND_CODE_API_KEY }),
+  // o TypeSafe directo: createJevClient({ apiKey: process.env.TYPESAFE_JEV_API_KEY,
+  //   endpoint: TYPESAFE_ENDPOINT, model: TYPESAFE_MODEL })
   emit: (msg) => broadcastToDisplays(msg)   // la función que ya existe
 });
 
@@ -43,9 +45,12 @@ Si no se puede tocar el servidor, hay una alternativa en el navegador: `examples
 ## Probarlo
 
 ```bash
-npm test            # 24 pruebas, sin red
-npm run simulate    # simulación en consola de un ponente hablando
-COMMAND_CODE_API_KEY=... npm run simulate   # lo mismo con Jev real
+npm test            # 26 pruebas, sin red
+npm run simulate    # simulación en consola de un ponente hablando (Jev simulado)
+
+# Con Jev real (TYPESAFE_JEV_API_KEY o COMMAND_CODE_API_KEY en el entorno):
+npm run simulate              # la misma simulación
+node examples/probe-jev.mjs   # 15 frases de calibración: errores, groserías reales, ambiguas
 ```
 
 Requisitos: Node 20 o superior. Sin dependencias.
@@ -62,6 +67,7 @@ Requisitos: Node 20 o superior. Sin dependencias.
 | `examples/` | Integración en servidor, integración en navegador y simulación. |
 | `docs/INTEGRACION.md` | Documento técnico completo (pensado también para un agente de código). |
 | `docs/DECISIONES.md` | Decisiones de diseño numeradas. |
+| `docs/CALIBRACION.md` | Resultados con Jev real y por qué los umbrales tienen esos valores. |
 
 ## Ajustes principales
 
@@ -69,7 +75,9 @@ Requisitos: Node 20 o superior. Sin dependencias.
 | --- | --- | --- |
 | `mask` | `'…'` | Lo que se ve en lugar de la palabra. Puede ser una función. |
 | `holdSealMs` | `900` | Cuánto se retiene el sello esperando a Jev. |
-| `thresholds.allowBelow` | `0.35` | Probabilidad máxima de «grosería real» para destapar o corregir. Más bajo = más estricto. |
+| `thresholds.allowBelow` | `0.2` | Probabilidad máxima de «grosería real» para destapar o corregir. |
+| `thresholds.choiceMin` / `keepMax` | `0.8` / `0.15` | Confianza mínima en la corrección y máxima en «era la palabra original». **Es el filtro que más protege** (ver `docs/CALIBRACION.md`). |
+| `minRightWords` | `3` | Palabras a la derecha que se esperan antes de consultar a Jev (o el sello). |
 | `minSeverity` | `2` | Severidad mínima del léxico (1 leve … 4 grave). |
 | `getSource` | — | Devuelve el texto original en inglés del segmento; mejora mucho las correcciones. |
 
@@ -77,4 +85,5 @@ Requisitos: Node 20 o superior. Sin dependencias.
 
 - Si el motor tiene el texto **en inglés** de cada segmento (para `getSource`).
 - Si `/listen` recibe el mismo flujo de `/display` (si no, hay que pasar el otro flujo por el guard también).
-- El formato exacto de la respuesta `choice` de Jev (ver `docs/INTEGRACION.md`, §8).
+
+Ya verificado con Jev real: formato de respuesta, latencia y umbrales (`docs/CALIBRACION.md`).

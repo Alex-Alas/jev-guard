@@ -21,7 +21,7 @@ export function fakeJev(rules) {
       const answers = { real: { noul: r.real } };
       if (questions.fix && r.fix) {
         const key = Object.keys(questions.fix.criteria).find((k) => questions.fix.criteria[k].includes(`"${r.fix}"`)) || 'keep';
-        answers.fix = { choice: key };
+        answers.fix = { choice: key, confidence: 1, probabilities: { [key]: 1, keep: key === 'keep' ? 1 : 0 } };
       }
       return { answers, latency: r.delay ?? 5 };
     }
