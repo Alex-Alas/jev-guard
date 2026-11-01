@@ -1,0 +1,22 @@
+<!--
+  INTEGRACIÓN ALTERNATIVA (sin tocar el servidor): envolver el punto de entrada
+  del overlay. En /overlay el WebSocket entrega cada mensaje a
+  `window.C2Caption.onMessage(m)`. Este bloque se pega DESPUÉS del script que
+  define window.C2Caption.
+
+  Limitaciones frente a la integración en servidor:
+  - Hay que cargarlo en CADA salida (overlay, overlay?live=1, listen).
+  - Necesita server/jev-proxy.mjs: la API key nunca va en el navegador.
+  - Cada pantalla llama a Jev por su cuenta (N salidas = N llamadas).
+-->
+<script type="module">
+  import { createCaptionGuard, createJevClient } from './jev-guard/src/index.js';
+
+  const original = window.C2Caption.onMessage;
+  const guard = createCaptionGuard({
+    jev: createJevClient({ proxyUrl: 'http://localhost:8790/jev', timeoutMs: 1500 }),
+    emit: (m) => original(m)
+  });
+  window.C2Caption.onMessage = (m) => guard.push(m);
+  window.JevGuard = guard; // para depurar: JevGuard.stats()
+</script>
